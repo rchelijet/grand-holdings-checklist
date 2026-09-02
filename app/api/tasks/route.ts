@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import {
   accessibleFacilityIds,
   canManageTask,
+  getTask,
   listTasks,
 } from "@/lib/tasks";
 import { sendTaskCreatedNotifications } from "@/lib/task-notifications";
@@ -69,7 +70,7 @@ export async function GET(request: Request) {
   const year = url.searchParams.get("year");
 
   return NextResponse.json({
-    tasks: listTasks(user, {
+    tasks: await listTasks(user, {
       facilityId: propertyId ? Number(propertyId) : null,
       status: status || "all",
       search: url.searchParams.get("search") || "",
@@ -102,20 +103,20 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!accessibleFacilityIds(user).includes(facilityId)) {
+    if (!(await accessibleFacilityIds(user)).includes(facilityId)) {
       return NextResponse.json({ error: "You cannot create a task for this property" }, { status: 403 });
     }
 
-    const db = getDb();
+    const db = await getDb();
     if (assignedUserId) {
-      const assignee = db
+      const assignee = (await db
         .prepare(
           `SELECT u.id, u.role, u.facility_id, u.access_all,
                   EXISTS(SELECT 1 FROM user_facilities uf
                          WHERE uf.user_id = u.id AND uf.facility_id = ?) AS assigned_access
            FROM users u WHERE u.id = ? AND u.active = 1`
         )
-        .get(facilityId, assignedUserId) as
+        .get(facilityId, assignedUserId)) as
         | { id: number; role: string; facility_id: number | null; access_all: number; assigned_access: number }
         | undefined;
       if (
@@ -130,7 +131,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const taskResult = db
+    const taskResult = await db
       .prepare(
         `INSERT INTO tasks (facility_id, title, description, expected_date, created_by, assigned_user_id)
          VALUES (?, ?, ?, ?, ?, ?)`
@@ -140,17 +141,19 @@ export async function POST(request: Request) {
 
     const files = await createTaskFilesToData(form);
     for (const file of files) {
-      db.prepare(
-        `INSERT INTO task_attachments (task_id, uploaded_by, file_name, mime_type, data)
+      await db
+        .prepare(
+          `INSERT INTO task_attachments (task_id, uploaded_by, file_name, mime_type, data)
          VALUES (?, ?, ?, ?, ?)`
-      ).run(taskId, user.id, file.name, file.type, file.data);
+        )
+        .run(taskId, user.id, file.name, file.type, file.data);
     }
 
     let notificationWarning: string | undefined;
     try {
-      const facility = db
+      const facility = (await db
         .prepare("SELECT name FROM facilities WHERE id = ?")
-        .get(facilityId) as { name: string } | undefined;
+        .get(facilityId)) as { name: string } | undefined;
       if (!facility) throw new Error("Property not found");
 
       const sentTo = await sendTaskCreatedNotifications(db, facilityId, {

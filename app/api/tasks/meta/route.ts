@@ -9,22 +9,22 @@ export async function GET() {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const db = getDb();
-  const facilityIds = accessibleFacilityIds(user);
+  const db = await getDb();
+  const facilityIds = await accessibleFacilityIds(user);
   const placeholders = facilityIds.map(() => "?").join(",") || "NULL";
-  const facilities = db
+  const facilities = await db
     .prepare(`SELECT id, name, address FROM facilities WHERE id IN (${placeholders}) ORDER BY name`)
     .all(...facilityIds);
 
   const users = canManageTask(user)
-    ? db
-    .prepare(
-      `SELECT id, name, email, role, facility_id FROM users
+    ? await db
+        .prepare(
+          `SELECT id, name, email, role, facility_id FROM users
        WHERE active = 1
          AND (role = 'admin' OR facility_id IN (${placeholders}))
        ORDER BY name`
-    )
-    .all(...facilityIds)
+        )
+        .all(...facilityIds)
     : [];
 
   return NextResponse.json({ facilities, users, role: user.role });

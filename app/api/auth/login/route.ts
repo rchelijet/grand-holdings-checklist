@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const result = authenticateUser(email, password);
+  const result = await authenticateUser(email, password);
   if (!result.ok) {
     const message =
       result.reason === "inactive"

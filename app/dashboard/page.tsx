@@ -7,7 +7,7 @@ import { Badge, EmptyState, PageHeader } from "@/components/ui";
 
 export default async function DashboardPage() {
   const user = await getSessionUser();
-  const pending = user ? getPendingChecklists(user) : [];
+  const pending = user ? await getPendingChecklists(user) : [];
 
   return (
     <div>

@@ -15,20 +15,22 @@ export async function PUT(
     const body = await request.json();
     const { name, address, contact_name, contact_phone, contact_email } = body;
 
-    const db = getDb();
-    db.prepare(
-      `UPDATE facilities SET name = ?, address = ?, contact_name = ?, contact_phone = ?, contact_email = ?
+    const db = await getDb();
+    await db
+      .prepare(
+        `UPDATE facilities SET name = ?, address = ?, contact_name = ?, contact_phone = ?, contact_email = ?
        WHERE id = ?`
-    ).run(
-      name?.trim() || "",
-      address?.trim() || "",
-      contact_name?.trim() || "",
-      contact_phone?.trim() || "",
-      contact_email?.trim() || "",
-      id
-    );
+      )
+      .run(
+        name?.trim() || "",
+        address?.trim() || "",
+        contact_name?.trim() || "",
+        contact_phone?.trim() || "",
+        contact_email?.trim() || "",
+        id
+      );
 
-    const facility = db.prepare(`SELECT * FROM facilities WHERE id = ?`).get(id);
+    const facility = await db.prepare(`SELECT * FROM facilities WHERE id = ?`).get(id);
     return NextResponse.json({ facility });
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
@@ -44,8 +46,8 @@ export async function DELETE(
     requireAdmin(user);
 
     const { id } = await params;
-    const db = getDb();
-    db.prepare(`DELETE FROM facilities WHERE id = ?`).run(id);
+    const db = await getDb();
+    await db.prepare(`DELETE FROM facilities WHERE id = ?`).run(id);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });

@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!canAccessFacility(user, facilityId)) {
+  if (!(await canAccessFacility(user, facilityId))) {
     return NextResponse.json(
       { error: "You do not have access to this property." },
       { status: 403 }
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   const saveStatus = status === "draft" ? "draft" : "prepared";
 
   try {
-    const submission = prepareGuestRegistration(
+    const submission = await prepareGuestRegistration(
       user,
       facilityId,
       data,

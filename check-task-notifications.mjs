@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
+import { createClient } from "@libsql/client";
+import { createDbClient } from "./lib/db-client.ts";
 import {
   composeTaskNotification,
   getTaskNotificationRecipients,
@@ -37,32 +38,34 @@ if (/\n\s*mail\s*\(/.test(read("php-site/inc/mail.php"))) {
   throw new Error("PHP notifications must not call the insecure mail() transport.");
 }
 
-const database = new Database(":memory:");
-database.exec(`
+const client = createClient({ url: ":memory:" });
+const database = createDbClient(client);
+await database.exec(`
   CREATE TABLE users (
     id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL,
-    role TEXT NOT NULL, facility_id INTEGER, access_all INTEGER NOT NULL
+    role TEXT NOT NULL, facility_id INTEGER, access_all INTEGER NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
   );
   CREATE TABLE user_facilities (user_id INTEGER NOT NULL, facility_id INTEGER NOT NULL);
 `);
-database
-  .prepare("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)")
-  .run(1, "All properties", "all@example.com", "manager", null, 1);
-database
-  .prepare("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)")
-  .run(2, "Legacy property", "legacy@example.com", "manager", 7, 0);
-database
-  .prepare("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)")
-  .run(3, "Assigned property", "assigned@example.com", "manager", 8, 0);
-database
-  .prepare("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)")
-  .run(4, "Other property", "other@example.com", "manager", 8, 0);
-database.prepare("INSERT INTO user_facilities VALUES (?, ?)").run(3, 7);
-database
-  .prepare("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)")
-  .run(5, "Basic user", "basic@example.com", "basic", null, 1);
+await database
+  .prepare("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)")
+  .run(1, "All properties", "all@example.com", "manager", null, 1, 1);
+await database
+  .prepare("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)")
+  .run(2, "Legacy property", "legacy@example.com", "manager", 7, 0, 1);
+await database
+  .prepare("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)")
+  .run(3, "Assigned property", "assigned@example.com", "manager", 8, 0, 1);
+await database
+  .prepare("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)")
+  .run(4, "Other property", "other@example.com", "manager", 8, 0, 1);
+await database.prepare("INSERT INTO user_facilities VALUES (?, ?)").run(3, 7);
+await database
+  .prepare("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)")
+  .run(5, "Basic user", "basic@example.com", "basic", null, 1, 1);
 
-const recipientIds = getTaskNotificationRecipients(database, 7).map(({ id }) => id);
+const recipientIds = (await getTaskNotificationRecipients(database, 7)).map(({ id }) => id);
 if (recipientIds.join(",") !== "1,2,3") {
   throw new Error(`Unexpected recipient selection: ${recipientIds.join(",")}`);
 }
@@ -85,5 +88,4 @@ if (
   throw new Error("Task notification composition check failed.");
 }
 
-database.close();
 console.log(`Passed ${checks.length + 3} task notification checks.`);

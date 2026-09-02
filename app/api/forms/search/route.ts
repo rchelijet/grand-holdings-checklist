@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   const formSlug = searchParams.get("formSlug") ?? undefined;
   const facilityId = searchParams.get("facilityId");
 
-  const submissions = searchFormSubmissions(user, {
+  const submissions = await searchFormSubmissions(user, {
     query,
     formSlug,
     facilityId: facilityId ? Number(facilityId) : undefined,

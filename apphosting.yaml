@@ -21,7 +21,7 @@ env:
       - RUNTIME
 
   # Create with: npx firebase-tools@latest apphosting:secrets:set AUTH_SECRET
-  # Grant with: npx firebase-tools@latest apphosting:secrets:grantaccess AUTH_SECRET,SMTP_PASSWORD --backend grand-holdings-checklist
+  # Grant with: npx firebase-tools@latest apphosting:secrets:grantaccess AUTH_SECRET,SMTP_PASSWORD,TURSO_DATABASE_URL,TURSO_AUTH_TOKEN --backend grand-holdings-checklist
   - variable: AUTH_SECRET
     secret: AUTH_SECRET
     availability:
@@ -30,6 +30,18 @@ env:
   # Create with: npx firebase-tools@latest apphosting:secrets:set SMTP_PASSWORD
   - variable: SMTP_PASSWORD
     secret: SMTP_PASSWORD
+    availability:
+      - RUNTIME
+
+  # Turso libSQL — create with apphosting:secrets:set (see docs/FIREBASE-DEPLOY.md)
+  # Grant with: ... grantaccess AUTH_SECRET,SMTP_PASSWORD,TURSO_DATABASE_URL,TURSO_AUTH_TOKEN
+  - variable: TURSO_DATABASE_URL
+    secret: TURSO_DATABASE_URL
+    availability:
+      - RUNTIME
+
+  - variable: TURSO_AUTH_TOKEN
+    secret: TURSO_AUTH_TOKEN
     availability:
       - RUNTIME
 

@@ -6,11 +6,13 @@ This guide deploys the Next.js checklist app to **Firebase App Hosting** (not Cl
 
 ### Critical blockers
 
-1. **SQLite does not persist on App Hosting.** The app stores data in `data/grand-holdings.db` and PDFs in `data/form-pdfs/`. Cloud Run containers use ephemeral disks — data is lost on redeploy, scale-to-zero, or new instances. **You must migrate to a cloud database before production use.** See [Database migration](#database-migration-required) below.
+1. **Database:** Production uses **Turso (libSQL)** via `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` App Hosting secrets. Local dev uses a SQLite file at `data/grand-holdings.db` automatically when those env vars are unset. See [Turso setup](#turso-database-setup).
 
-2. **Blaze (pay-as-you-go) plan required.** App Hosting is not available on the free Spark plan. Upgrade at [Firebase billing](https://console.firebase.google.com/project/_/overview?purchaseBillingPlan=metered).
+2. **PDF files on disk** (`data/form-pdfs/`) are still ephemeral on App Hosting — guest registration PDFs are written to the container filesystem and lost on redeploy. Database rows persist; PDF downloads may fail until you migrate PDFs to Cloud Storage (separate task).
 
-3. **Build must pass locally.** Run `npm run build` before deploying. Fix any TypeScript or build errors first.
+3. **Blaze (pay-as-you-go) plan required.** App Hosting is not available on the free Spark plan. Upgrade at [Firebase billing](https://console.firebase.google.com/project/_/overview?purchaseBillingPlan=metered).
+
+4. **Build must pass locally.** Run `npm run build` before deploying. Fix any TypeScript or build errors first.
 
 ### What you need from your side
 
@@ -21,7 +23,8 @@ This guide deploys the Next.js checklist app to **Firebase App Hosting** (not Cl
 | Blaze billing enabled | Required for App Hosting |
 | `AUTH_SECRET` | Long random string for signed session cookies |
 | `SMTP_PASSWORD` | Rotated SMTP credential for task email notifications |
-| (Later) Cloud database | Replace SQLite for persistent production data |
+| `TURSO_DATABASE_URL` | Turso libSQL database URL (production) |
+| `TURSO_AUTH_TOKEN` | Turso database auth token (production) |
 
 ---
 
@@ -81,11 +84,19 @@ openssl rand -base64 48 | npx -y firebase-tools@latest apphosting:secrets:set AU
 # SMTP password (use your rotated credential, not the old leaked one)
 printf '%s' 'YOUR_SMTP_PASSWORD' | npx -y firebase-tools@latest apphosting:secrets:set SMTP_PASSWORD --project YOUR_PROJECT_ID --data-file -
 
-# Grant the backend access to both secrets (comma-separated, not space-separated)
-npx -y firebase-tools@latest apphosting:secrets:grantaccess AUTH_SECRET,SMTP_PASSWORD --backend grand-holdings-checklist --project YOUR_PROJECT_ID
+# Turso database URL (from turso db show --url)
+printf '%s' 'libsql://YOUR-DB-NAME-ORG.turso.io' | npx -y firebase-tools@latest apphosting:secrets:set TURSO_DATABASE_URL --project YOUR_PROJECT_ID --data-file -
+
+# Turso auth token (from turso db tokens create)
+printf '%s' 'YOUR_TURSO_AUTH_TOKEN' | npx -y firebase-tools@latest apphosting:secrets:set TURSO_AUTH_TOKEN --project YOUR_PROJECT_ID --data-file -
+
+# Grant the backend access to all secrets (comma-separated, not space-separated)
+npx -y firebase-tools@latest apphosting:secrets:grantaccess AUTH_SECRET,SMTP_PASSWORD,TURSO_DATABASE_URL,TURSO_AUTH_TOKEN --backend grand-holdings-checklist --project YOUR_PROJECT_ID
 ```
 
-Grant access when prompted during `secrets:set`, or run `grantaccess` afterward. Secret names must match `apphosting.yaml` (`AUTH_SECRET`, `SMTP_PASSWORD`). **Use a comma between secret names** — `AUTH_SECRET SMTP_PASSWORD` is treated as one invalid secret ID.
+Grant access when prompted during `secrets:set`, or run `grantaccess` afterward. Secret names must match `apphosting.yaml` (`AUTH_SECRET`, `SMTP_PASSWORD`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`). **Use commas between secret names** — space-separated names are treated as one invalid secret ID.
+
+Turso secrets use `RUNTIME` availability only (see `apphosting.yaml`) — they are not needed at build time.
 
 Non-secret SMTP settings are already in `apphosting.yaml`. Override there if your mail host differs.
 
@@ -115,9 +126,82 @@ Initial rollout can take ~5 minutes.
 ## Step 6: Post-deploy checks
 
 1. Open the hosted URL → should redirect to `/login`.
-2. Log in with seeded demo credentials (only if DB was migrated/seeded — see below).
+2. Log in with seeded demo credentials (`admin@grandholdings.co.za` / `admin123` on first Turso connection, or your migrated users).
 3. Create a test task and confirm SMTP notifications (check server logs in Cloud Logging if mail fails).
-4. **Do not rely on SQLite in production** — verify data survives a redeploy.
+4. **Verify data survives a redeploy** — create a record, redeploy, confirm it still exists.
+
+---
+
+## Turso database setup
+
+Production data is stored in [Turso](https://turso.tech) (libSQL). The app uses `@libsql/client`:
+
+- **Production:** `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` (Firebase secrets)
+- **Local dev:** no Turso env vars → uses `file:data/grand-holdings.db` automatically
+
+### 1. Install Turso CLI and create a database
+
+```bash
+# macOS
+brew install tursodatabase/tap/turso
+turso auth login
+
+# Create database (pick a name, e.g. grand-holdings-checklist)
+turso db create grand-holdings-checklist
+
+# Get connection URL and create an auth token
+turso db show grand-holdings-checklist --url
+turso db tokens create grand-holdings-checklist
+```
+
+Save the URL (format `libsql://…turso.io`) and token — you will add them as Firebase secrets in Step 4.
+
+For project **grandh-3c1b2**:
+
+```bash
+PROJECT_ID=grandh-3c1b2
+
+printf '%s' 'libsql://YOUR-DB.turso.io' | npx -y firebase-tools@latest apphosting:secrets:set TURSO_DATABASE_URL --project "$PROJECT_ID" --data-file -
+printf '%s' 'YOUR_TURSO_TOKEN' | npx -y firebase-tools@latest apphosting:secrets:set TURSO_AUTH_TOKEN --project "$PROJECT_ID" --data-file -
+npx -y firebase-tools@latest apphosting:secrets:grantaccess TURSO_DATABASE_URL,TURSO_AUTH_TOKEN --backend grand-holdings-checklist --project "$PROJECT_ID"
+```
+
+### 2. First deploy / empty database
+
+On first connection to an empty Turso database, the app runs schema migration and seeds demo data (admin user, sample properties, daily checklist). Same behavior as local SQLite.
+
+Demo login after seed:
+
+- **Admin:** `admin@grandholdings.co.za` / `admin123`
+- **Manager:** `manager.cpt@grandholdings.co.za` / `manager123`
+
+Change passwords immediately in production.
+
+### 3. Optional: migrate existing local SQLite data
+
+If you have data in `data/grand-holdings.db` from local dev:
+
+```bash
+# Export local SQLite to SQL dump
+sqlite3 data/grand-holdings.db .dump > /tmp/grand-holdings.sql
+
+# Import into Turso (requires turso CLI)
+turso db shell grand-holdings-checklist < /tmp/grand-holdings.sql
+```
+
+Review the dump for `BEGIN TRANSACTION` / `COMMIT` compatibility. For small datasets, re-seeding and re-entering data may be simpler.
+
+### 4. Local dev with Turso (optional)
+
+To point local dev at Turso instead of the file:
+
+```bash
+export TURSO_DATABASE_URL="libsql://YOUR-DB.turso.io"
+export TURSO_AUTH_TOKEN="YOUR_TOKEN"
+npm run dev
+```
+
+Or add these to `.env.local` (never commit).
 
 ---
 
@@ -125,7 +209,7 @@ Initial rollout can take ~5 minutes.
 
 Instead of `firebase deploy`, connect a GitHub repo in Firebase Console → App Hosting → **Create backend** → connect repository. Pushes to your live branch auto-deploy.
 
-Use this after the database migration is complete.
+Use this after Turso secrets are configured and a first deploy has succeeded.
 
 ---
 
@@ -135,48 +219,34 @@ Firebase Console → App Hosting → your backend → **Add custom domain** (e.g
 
 ---
 
-## Database migration (required)
+## File uploads and PDFs
 
-App Hosting **cannot** use local SQLite in production. Pick one:
-
-### Recommended: Turso (libSQL) — minimal code change
-
-- SQLite-compatible SQL; smallest migration from `better-sqlite3`.
-- Works on serverless; remote database with persistent storage.
-- Not a Firebase product, but pairs well with App Hosting.
-- Rough cost: free tier for small teams; ~$5–29/mo for production scale.
-
-**Migration outline:**
-
-1. Create a Turso database and auth token.
-2. Replace `better-sqlite3` with `@libsql/client` in `lib/db.ts`.
-3. Export local SQLite → import to Turso (or run schema + seed).
-4. Add `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as App Hosting secrets.
-5. Move PDF files from `data/form-pdfs/` to Firebase Cloud Storage or store in DB.
-
-### Alternative: Cloud SQL (PostgreSQL) — native GCP
-
-- Best if you want everything in Google Cloud.
-- Requires SQL dialect changes (SQLite → PostgreSQL).
-- Rough cost: ~$10–50+/mo for a small always-on instance.
-
-### Alternative: Firestore — native Firebase
-
-- Requires rewriting the entire data layer (no SQL).
-- Best long-term Firebase integration, highest migration effort.
-- Rough cost: free tier generous; pay per read/write at scale.
-
-### Not recommended for this app: Classic Firebase Hosting
-
-Static/SPA only — **cannot** run API routes, SQLite, or cookie auth server logic.
+- Task attachments and identity documents are stored as base64 in the database (persists with Turso).
+- Guest registration PDFs are written to `data/form-pdfs/` on disk — **still ephemeral** on App Hosting.
+- Production fix (future): store PDF blobs in **Firebase Cloud Storage** and save URLs in the database.
 
 ---
 
-## File uploads and PDFs
+## Database alternatives (reference)
 
-- Task attachments and identity documents are stored as base64 in SQLite today.
-- Guest registration PDFs are written to `data/form-pdfs/` on disk — **also ephemeral** on App Hosting.
-- Production fix: store blobs in **Firebase Cloud Storage** (or keep in DB if size allows) and store URLs/paths in the database.
+<details>
+<summary>Other options if not using Turso</summary>
+
+### Cloud SQL (PostgreSQL) — native GCP
+
+- Requires SQL dialect changes (SQLite → PostgreSQL).
+- Rough cost: ~$10–50+/mo for a small always-on instance.
+
+### Firestore — native Firebase
+
+- Requires rewriting the entire data layer (no SQL).
+- Highest migration effort.
+
+### Classic Firebase Hosting
+
+- Static/SPA only — cannot run API routes or cookie auth server logic.
+
+</details>
 
 ---
 
@@ -190,8 +260,8 @@ For a small team (~10–50 users, low traffic), expect **~$0–5/month** within 
 | Cloud Run requests | 2M/mo | Internal app unlikely to exceed |
 | App Hosting bandwidth | 10 GiB/mo | Then $0.15–0.20/GiB |
 | Cloud Build | 2,500 build-min/mo | One deploy ≈ few minutes |
-| Secret Manager | 6 active secret versions free | AUTH_SECRET + SMTP_PASSWORD |
-| **Database (Turso/Cloud SQL)** | — | **+$0–50/mo depending on choice** |
+| Secret Manager | 6 active secret versions free | AUTH_SECRET, SMTP_PASSWORD, Turso secrets |
+| **Turso** | Free tier for small teams | ~$0–29/mo at production scale |
 
 Firebase’s own example: ~**$0.01/mo at 10k visits**, ~**$70/mo at 1M visits** (mostly bandwidth). Internal staff usage should stay at the low end.
 
@@ -205,10 +275,11 @@ Set a [budget spend cap](https://firebase.google.com/docs/projects/billing/avoid
 |---------|-----|
 | `No authorized accounts` | Run `firebase login` |
 | `403 PERMISSION_DENIED` on first deploy | Project Owner must run first deploy to create storage bucket |
-| `Misconfigured secret` / secret version errors | Create secrets; run `grantaccess` with comma-separated names: `AUTH_SECRET,SMTP_PASSWORD` |
+| `Misconfigured secret` / secret version errors | Create secrets; run `grantaccess` with comma-separated names: `AUTH_SECRET,SMTP_PASSWORD,TURSO_DATABASE_URL,TURSO_AUTH_TOKEN` |
 | Build fails on `apphosting-adapter-nextjs-build` | Open rollout debug logs; confirm `grantaccess` succeeded; run `npm run build` locally |
-| Build fails on `better-sqlite3` | `serverExternalPackages` is set in `next.config.ts`; ensure native module compiles in Cloud Build |
-| App loads but data resets | Expected with SQLite — migrate database |
+| Build fails on native modules | `serverExternalPackages` in `next.config.ts` includes `@libsql/client` and `bcryptjs` |
+| App loads but data resets | Turso secrets missing or not granted — check Cloud Run env and `grantaccess` |
+| Turso connection errors | Verify `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`; token must match the database |
 | SMTP errors | Verify `SMTP_PASSWORD` secret; check Cloud Logging |
 | TypeScript build errors | Run `npm run build` locally; `ripple-sync/` is excluded from main app TS config |
 
@@ -221,6 +292,8 @@ Set a [budget spend cap](https://firebase.google.com/docs/projects/billing/avoid
 | `firebase.json` | App Hosting backend and deploy ignore list |
 | `apphosting.yaml` | Cloud Run resources, env vars, secret references |
 | `.firebaserc.example` | Template — copy to `.firebaserc` with your project ID |
-| `next.config.ts` | `serverExternalPackages` for native Node modules |
+| `next.config.ts` | `serverExternalPackages` for `@libsql/client` / `bcryptjs` |
+| `lib/db.ts` | Database init, schema, seed — Turso or local file via `@libsql/client` |
+| `lib/db-client.ts` | libSQL client wrapper with prepare/run/get/all API |
 
 Do **not** commit `.firebaserc` if it contains sensitive info (project ID alone is fine). Never commit `.env.local`, secrets, or `data/`.

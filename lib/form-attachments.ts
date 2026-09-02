@@ -31,14 +31,16 @@ export async function fileToIdentityDocument(
   };
 }
 
-export function saveIdentityDocuments(
+export async function saveIdentityDocuments(
   submissionId: number,
   documents: StoredIdentityDocument[]
-): void {
-  const db = getDb();
-  db.prepare(
-    "DELETE FROM form_submission_attachments WHERE submission_id = ? AND kind = 'identity_document'"
-  ).run(submissionId);
+): Promise<void> {
+  const db = await getDb();
+  await db
+    .prepare(
+      "DELETE FROM form_submission_attachments WHERE submission_id = ? AND kind = 'identity_document'"
+    )
+    .run(submissionId);
 
   const insert = db.prepare(`
     INSERT INTO form_submission_attachments (
@@ -47,22 +49,22 @@ export function saveIdentityDocuments(
   `);
 
   for (const doc of documents) {
-    insert.run(submissionId, doc.fileName, doc.mimeType, doc.data);
+    await insert.run(submissionId, doc.fileName, doc.mimeType, doc.data);
   }
 }
 
-export function getIdentityDocuments(
+export async function getIdentityDocuments(
   submissionId: number
-): IdentityDocumentAttachment[] {
-  const db = getDb();
-  const rows = db
+): Promise<IdentityDocumentAttachment[]> {
+  const db = await getDb();
+  const rows = (await db
     .prepare(
       `SELECT id, file_name, mime_type, data
        FROM form_submission_attachments
        WHERE submission_id = ? AND kind = 'identity_document'
        ORDER BY id ASC`
     )
-    .all(submissionId) as {
+    .all(submissionId)) as {
     id: number;
     file_name: string;
     mime_type: string;

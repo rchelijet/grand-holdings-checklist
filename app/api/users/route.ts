@@ -9,8 +9,8 @@ export async function GET() {
     const user = await getSessionUser();
     const actor = requireManager(user);
 
-    const db = getDb();
-    const users = db
+    const db = await getDb();
+    const users = (await db
       .prepare(
         `
       SELECT u.id, u.email, u.name, u.role, u.facility_id, u.access_all, u.created_at,
@@ -24,7 +24,7 @@ export async function GET() {
       ORDER BY u.name
     `
       )
-      .all() as Array<Record<string, unknown>>;
+      .all()) as Array<Record<string, unknown>>;
 
     const usersWithFacilities = users.map((user) => {
       const facilityIdList = user.facility_id_list as string | null;
@@ -93,13 +93,15 @@ export async function POST(request: Request) {
       );
     }
 
-    const db = getDb();
+    const db = await getDb();
     const existingFacilityIds = new Set(
-      (db
-        .prepare(
-          `SELECT id FROM facilities WHERE id IN (${facilityIds.map(() => "?").join(",") || "NULL"})`
-        )
-        .all(...facilityIds) as { id: number }[]).map((facility) => facility.id)
+      (
+        (await db
+          .prepare(
+            `SELECT id FROM facilities WHERE id IN (${facilityIds.map(() => "?").join(",") || "NULL"})`
+          )
+          .all(...facilityIds)) as { id: number }[]
+      ).map((facility) => facility.id)
     );
     if (facilityIds.some((facilityId) => !existingFacilityIds.has(facilityId))) {
       return NextResponse.json({ error: "One or more selected properties do not exist" }, { status: 400 });
@@ -107,7 +109,7 @@ export async function POST(request: Request) {
     const passwordHash = bcrypt.hashSync(password, 10);
 
     try {
-      const result = db
+      const result = await db
         .prepare(
           `INSERT INTO users (email, password_hash, name, role, facility_id, access_all)
            VALUES (?, ?, ?, ?, ?, ?)`
@@ -121,7 +123,7 @@ export async function POST(request: Request) {
           accessAll || role === "admin" ? 1 : 0
         );
 
-      const newUser = db
+      const newUser = await db
         .prepare(
           `SELECT id, email, name, role, facility_id, access_all, created_at FROM users WHERE id = ?`
         )
@@ -131,7 +133,7 @@ export async function POST(request: Request) {
           "INSERT INTO user_facilities (user_id, facility_id) VALUES (?, ?)"
         );
         for (const facilityId of facilityIds) {
-          assign.run(result.lastInsertRowid, facilityId);
+          await assign.run(result.lastInsertRowid, facilityId);
         }
       }
 

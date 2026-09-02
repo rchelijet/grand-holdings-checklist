@@ -11,5 +11,5 @@ export async function GET() {
   if (!canManageTask(user)) {
     return NextResponse.json({ error: "Manager or administrator access required" }, { status: 403 });
   }
-  return NextResponse.json(getTaskDashboard(user));
+  return NextResponse.json(await getTaskDashboard(user));
 }

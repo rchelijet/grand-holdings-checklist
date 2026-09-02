@@ -2,27 +2,30 @@ import bcrypt from "bcryptjs";
 import { getDb } from "./db";
 import type { SessionUser, UserRole } from "./types";
 
-function getUserFacilityIds(userId: number): number[] {
-  return (getDb()
-    .prepare("SELECT facility_id FROM user_facilities WHERE user_id = ?")
-    .all(userId) as { facility_id: number }[]).map((row) => row.facility_id);
+async function getUserFacilityIds(userId: number): Promise<number[]> {
+  const db = await getDb();
+  return (
+    (await db
+      .prepare("SELECT facility_id FROM user_facilities WHERE user_id = ?")
+      .all(userId)) as { facility_id: number }[]
+  ).map((row) => row.facility_id);
 }
 
 export type AuthResult =
   | { ok: true; user: SessionUser }
   | { ok: false; reason: "invalid_credentials" | "inactive" };
 
-export function authenticateUser(
+export async function authenticateUser(
   email: string,
   password: string
-): AuthResult {
-  const db = getDb();
-  const row = db
+): Promise<AuthResult> {
+  const db = await getDb();
+  const row = (await db
     .prepare(
       `SELECT id, email, password_hash, name, role, facility_id, access_all, active
        FROM users WHERE email = ?`
     )
-    .get(email) as
+    .get(email)) as
     | {
         id: number;
         email: string;
@@ -51,7 +54,7 @@ export function authenticateUser(
       name: row.name,
       role: row.role,
       facilityId: row.facility_id,
-      facilityIds: getUserFacilityIds(row.id),
+      facilityIds: await getUserFacilityIds(row.id),
       accessAll: row.access_all === 1 || row.role === "admin",
     },
   };

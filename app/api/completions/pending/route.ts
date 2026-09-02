@@ -8,6 +8,6 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const pending = getPendingChecklists(user);
+  const pending = await getPendingChecklists(user);
   return NextResponse.json({ pending });
 }

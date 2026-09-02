@@ -13,13 +13,14 @@ export async function GET() {
     return NextResponse.json({ error: "Manager or administrator access required" }, { status: 403 });
   }
 
-  const db = getDb();
-  const facilityIds = accessibleFacilityIds(user);
+  const db = await getDb();
+  const facilityIds = await accessibleFacilityIds(user);
   const placeholders = facilityIds.map(() => "?").join(",") || "NULL";
-  const checklists = db.prepare(
-    user.role === "admin"
-      ? `SELECT c.* FROM checklists c ORDER BY c.name`
-      : `SELECT c.* FROM checklists c
+  const checklists = (await db
+    .prepare(
+      user.role === "admin"
+        ? `SELECT c.* FROM checklists c ORDER BY c.name`
+        : `SELECT c.* FROM checklists c
          WHERE EXISTS (
            SELECT 1 FROM checklist_facilities visible_cf
            WHERE visible_cf.checklist_id = c.id
@@ -31,31 +32,34 @@ export async function GET() {
              AND hidden_cf.facility_id NOT IN (${placeholders})
          )
          ORDER BY c.name`
-  ).all(...(user.role === "admin" ? [] : [...facilityIds, ...facilityIds])) as {
+    )
+    .all(...(user.role === "admin" ? [] : [...facilityIds, ...facilityIds]))) as {
     id: number;
     name: string;
     frequency: string;
   }[];
 
-  const result = checklists.map((c) => {
-    const facilities = db
-      .prepare(
-        `
+  const result = await Promise.all(
+    checklists.map(async (c) => {
+      const facilities = await db
+        .prepare(
+          `
       SELECT f.id, f.name FROM facilities f
       JOIN checklist_facilities cf ON cf.facility_id = f.id
       WHERE cf.checklist_id = ?
     `
-      )
-      .all(c.id);
+        )
+        .all(c.id);
 
-    const items = db
-      .prepare(
-        `SELECT * FROM checklist_items WHERE checklist_id = ? ORDER BY sort_order`
-      )
-      .all(c.id);
+      const items = await db
+        .prepare(
+          `SELECT * FROM checklist_items WHERE checklist_id = ? ORDER BY sort_order`
+        )
+        .all(c.id);
 
-    return { ...c, facilities, items, itemCount: items.length };
-  });
+      return { ...c, facilities, items, itemCount: items.length };
+    })
+  );
 
   return NextResponse.json({ checklists: result });
 }
@@ -88,12 +92,12 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (!canAssignChecklistFacilities(user, normalizedFacilityIds)) {
+    if (!(await canAssignChecklistFacilities(user, normalizedFacilityIds))) {
       return NextResponse.json({ error: "You cannot assign a checklist to one or more properties" }, { status: 403 });
     }
 
-    const db = getDb();
-    const result = db
+    const db = await getDb();
+    const result = await db
       .prepare(`INSERT INTO checklists (name, frequency) VALUES (?, ?)`)
       .run(name.trim(), frequency);
 
@@ -102,10 +106,10 @@ export async function POST(request: Request) {
       `INSERT INTO checklist_facilities (checklist_id, facility_id) VALUES (?, ?)`
     );
     for (const fid of normalizedFacilityIds) {
-      assign.run(checklistId, fid);
+      await assign.run(checklistId, fid);
     }
 
-    const checklist = db
+    const checklist = await db
       .prepare(`SELECT * FROM checklists WHERE id = ?`)
       .get(checklistId);
 

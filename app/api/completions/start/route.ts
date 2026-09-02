@@ -18,10 +18,10 @@ export async function POST(request: Request) {
   if (!checklistId || !facilityId || !dueDate) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 });
   }
-  if (!canAccessFacility(user, Number(facilityId))) {
+  if (!(await canAccessFacility(user, Number(facilityId)))) {
     return NextResponse.json({ error: "You cannot complete this property checklist" }, { status: 403 });
   }
-  const assignment = getDb()
+  const assignment = await (await getDb())
     .prepare(
       "SELECT 1 FROM checklist_facilities WHERE checklist_id = ? AND facility_id = ?"
     )
@@ -31,13 +31,13 @@ export async function POST(request: Request) {
   }
 
   try {
-    const completionId = getOrCreateCompletion(
+    const completionId = await getOrCreateCompletion(
       Number(checklistId),
       Number(facilityId),
       dueDate,
       user.id
     );
-    const detail = getCompletionDetail(completionId);
+    const detail = await getCompletionDetail(completionId);
     return NextResponse.json(detail);
   } catch (error) {
     const message =

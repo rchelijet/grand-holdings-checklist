@@ -37,20 +37,20 @@ export interface CompletionSearchResult {
   completed_by: string | null;
 }
 
-function getFacilityIdsForUser(user: SessionUser): number[] {
+async function getFacilityIdsForUser(user: SessionUser): Promise<number[]> {
   return accessibleFacilityIds(user);
 }
 
-export function getPendingChecklists(
+export async function getPendingChecklists(
   user: SessionUser,
   referenceDate: Date = new Date()
-): PendingChecklist[] {
-  const db = getDb();
-  const facilityIds = getFacilityIdsForUser(user);
+): Promise<PendingChecklist[]> {
+  const db = await getDb();
+  const facilityIds = await getFacilityIdsForUser(user);
   if (facilityIds.length === 0) return [];
 
   const placeholders = facilityIds.map(() => "?").join(",");
-  const assignments = db
+  const assignments = (await db
     .prepare(
       `
     SELECT c.id as checklist_id, c.name as checklist_name, c.frequency,
@@ -62,7 +62,7 @@ export function getPendingChecklists(
     ORDER BY c.name, f.name
   `
     )
-    .all(...facilityIds) as {
+    .all(...facilityIds)) as {
     checklist_id: number;
     checklist_name: string;
     frequency: Frequency;
@@ -74,22 +74,22 @@ export function getPendingChecklists(
   const pending: PendingChecklist[] = [];
 
   for (const row of assignments) {
-    const completions = db
+    const completions = (await db
       .prepare(
         `SELECT id, due_date as dueDate, status FROM checklist_completions
          WHERE checklist_id = ? AND facility_id = ?`
       )
-      .all(row.checklist_id, row.facility_id) as {
+      .all(row.checklist_id, row.facility_id)) as {
       id: number;
       dueDate: string;
       status: string;
     }[];
 
-    const itemCount = db
+    const itemCount = (await db
       .prepare(
         `SELECT COUNT(*) as count FROM checklist_items WHERE checklist_id = ?`
       )
-      .get(row.checklist_id) as { count: number };
+      .get(row.checklist_id)) as { count: number };
 
     for (const period of getPendingPeriods(
       row.frequency,
@@ -118,29 +118,29 @@ export function getPendingChecklists(
   );
 }
 
-export function canAccessCompletion(
+export async function canAccessCompletion(
   user: SessionUser,
   completionId: number
-): boolean {
-  const row = getDb()
+): Promise<boolean> {
+  const row = (await (await getDb())
     .prepare("SELECT facility_id FROM checklist_completions WHERE id = ?")
-    .get(completionId) as { facility_id: number } | undefined;
-  return Boolean(row && accessibleFacilityIds(user).includes(row.facility_id));
+    .get(completionId)) as { facility_id: number } | undefined;
+  return Boolean(row && (await accessibleFacilityIds(user)).includes(row.facility_id));
 }
 
-function syncCompletionItems(completionId: number, checklistId: number) {
-  const db = getDb();
-  const templateItems = db
+async function syncCompletionItems(completionId: number, checklistId: number) {
+  const db = await getDb();
+  const templateItems = (await db
     .prepare(
       `SELECT id FROM checklist_items WHERE checklist_id = ? ORDER BY sort_order`
     )
-    .all(checklistId) as { id: number }[];
+    .all(checklistId)) as { id: number }[];
 
-  const existingItems = db
+  const existingItems = (await db
     .prepare(
       `SELECT item_id FROM checklist_completion_items WHERE completion_id = ?`
     )
-    .all(completionId) as { item_id: number }[];
+    .all(completionId)) as { item_id: number }[];
 
   const existingIds = new Set(existingItems.map((item) => item.item_id));
   const templateIds = new Set(templateItems.map((item) => item.id));
@@ -150,13 +150,13 @@ function syncCompletionItems(completionId: number, checklistId: number) {
   );
   for (const item of templateItems) {
     if (!existingIds.has(item.id)) {
-      insertItem.run(completionId, item.id);
+      await insertItem.run(completionId, item.id);
     }
   }
 
-  const completion = db
+  const completion = (await db
     .prepare(`SELECT status FROM checklist_completions WHERE id = ?`)
-    .get(completionId) as { status: string } | undefined;
+    .get(completionId)) as { status: string } | undefined;
 
   if (completion?.status === "pending") {
     const remove = db.prepare(
@@ -164,7 +164,7 @@ function syncCompletionItems(completionId: number, checklistId: number) {
     );
     for (const item of existingItems) {
       if (!templateIds.has(item.item_id)) {
-        remove.run(completionId, item.item_id);
+        await remove.run(completionId, item.item_id);
       }
     }
   }
@@ -180,17 +180,17 @@ export function assertCompletableCurrentPeriod(
   }
 }
 
-export function getOrCreateCompletion(
+export async function getOrCreateCompletion(
   checklistId: number,
   facilityId: number,
   dueDate: string,
   userId: number,
   referenceDate: Date = new Date()
-): number {
-  const db = getDb();
-  const checklist = db
+): Promise<number> {
+  const db = await getDb();
+  const checklist = (await db
     .prepare(`SELECT frequency FROM checklists WHERE id = ?`)
-    .get(checklistId) as { frequency: Frequency } | undefined;
+    .get(checklistId)) as { frequency: Frequency } | undefined;
 
   if (!checklist) {
     throw new Error("Checklist not found.");
@@ -201,32 +201,36 @@ export function getOrCreateCompletion(
     dueDate,
     referenceDate
   );
-  const existing = db
+  const existing = (await db
     .prepare(
       `SELECT id FROM checklist_completions
        WHERE checklist_id = ? AND facility_id = ? AND due_date = ?`
     )
-    .get(checklistId, facilityId, dueDate) as { id: number } | undefined;
+    .get(checklistId, facilityId, dueDate)) as { id: number } | undefined;
 
   if (existing) {
-    const row = db
+    const row = (await db
       .prepare(`SELECT status FROM checklist_completions WHERE id = ?`)
-      .get(existing.id) as { status: string };
+      .get(existing.id)) as { status: string };
 
     if (row.status === "completed") {
-      db.prepare(
-        `UPDATE checklist_completions SET status = 'pending', submitted_at = NULL, user_id = ? WHERE id = ?`
-      ).run(userId, existing.id);
-      db.prepare(
-        `UPDATE checklist_completion_items SET completed = 0, note = NULL WHERE completion_id = ?`
-      ).run(existing.id);
+      await db
+        .prepare(
+          `UPDATE checklist_completions SET status = 'pending', submitted_at = NULL, user_id = ? WHERE id = ?`
+        )
+        .run(userId, existing.id);
+      await db
+        .prepare(
+          `UPDATE checklist_completion_items SET completed = 0, note = NULL WHERE completion_id = ?`
+        )
+        .run(existing.id);
     }
 
-    syncCompletionItems(existing.id, checklistId);
+    await syncCompletionItems(existing.id, checklistId);
     return existing.id;
   }
 
-  const result = db
+  const result = await db
     .prepare(
       `INSERT INTO checklist_completions (checklist_id, facility_id, user_id, due_date, status)
        VALUES (?, ?, ?, ?, 'pending')`
@@ -234,19 +238,19 @@ export function getOrCreateCompletion(
     .run(checklistId, facilityId, userId, dueDate);
 
   const completionId = Number(result.lastInsertRowid);
-  syncCompletionItems(completionId, checklistId);
+  await syncCompletionItems(completionId, checklistId);
   return completionId;
 }
 
-export function searchCompletions(
+export async function searchCompletions(
   user: SessionUser,
   dateFrom: string | null,
   dateTo: string | null,
   facilityId: number | null,
   referenceDate: Date = new Date()
-): CompletionSearchResult[] {
-  const db = getDb();
-  const facilityIds = getFacilityIdsForUser(user);
+): Promise<CompletionSearchResult[]> {
+  const db = await getDb();
+  const facilityIds = await getFacilityIdsForUser(user);
   if (facilityIds.length === 0) return [];
 
   const scopedFacilityIds = facilityId
@@ -259,7 +263,7 @@ export function searchCompletions(
     dateFrom || addCalendarDays(effectiveTo, -(HISTORY_DEFAULT_DAYS - 1));
 
   const placeholders = scopedFacilityIds.map(() => "?").join(",");
-  const assignments = db
+  const assignments = (await db
     .prepare(
       `
     SELECT c.id as checklist_id, c.name as checklist_name, c.frequency,
@@ -271,7 +275,7 @@ export function searchCompletions(
     ORDER BY c.name, f.name
   `
     )
-    .all(...scopedFacilityIds) as {
+    .all(...scopedFacilityIds)) as {
     checklist_id: number;
     checklist_name: string;
     frequency: Frequency;
@@ -279,7 +283,7 @@ export function searchCompletions(
     facility_name: string;
   }[];
 
-  const dbRecords = db
+  const dbRecords = (await db
     .prepare(
       `
     SELECT cc.id, c.name as checklist_name, c.frequency, f.name as facility_name,
@@ -295,7 +299,7 @@ export function searchCompletions(
     ORDER BY cc.due_date DESC, f.name, c.name
   `
     )
-    .all(...scopedFacilityIds, effectiveFrom, effectiveTo) as {
+    .all(...scopedFacilityIds, effectiveFrom, effectiveTo)) as {
     id: number;
     checklist_id: number;
     checklist_name: string;
@@ -378,9 +382,9 @@ export function searchCompletions(
   );
 }
 
-export function getCompletionDetail(completionId: number) {
-  const db = getDb();
-  const completion = db
+export async function getCompletionDetail(completionId: number) {
+  const db = await getDb();
+  const completion = await db
     .prepare(
       `
     SELECT cc.*, c.name as checklist_name, c.frequency, f.name as facility_name, u.name as user_name
@@ -395,7 +399,7 @@ export function getCompletionDetail(completionId: number) {
 
   if (!completion) return null;
 
-  const items = db
+  const items = await db
     .prepare(
       `
     SELECT cci.*, ci.description, ci.sort_order

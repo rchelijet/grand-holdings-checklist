@@ -12,7 +12,7 @@ export async function POST(
     const user = requireManager(await getSessionUser());
 
     const { id } = await params;
-    if (!canManageChecklist(user, Number(id))) {
+    if (!(await canManageChecklist(user, Number(id)))) {
       return NextResponse.json({ error: "Checklist not found" }, { status: 404 });
     }
     const body = await request.json();
@@ -25,20 +25,20 @@ export async function POST(
       );
     }
 
-    const db = getDb();
-    const maxOrder = db
+    const db = await getDb();
+    const maxOrder = (await db
       .prepare(
         `SELECT COALESCE(MAX(sort_order), -1) as max_order FROM checklist_items WHERE checklist_id = ?`
       )
-      .get(id) as { max_order: number };
+      .get(id)) as { max_order: number };
 
-    const result = db
+    const result = await db
       .prepare(
         `INSERT INTO checklist_items (checklist_id, description, sort_order) VALUES (?, ?, ?)`
       )
       .run(id, description.trim(), maxOrder.max_order + 1);
 
-    const item = db
+    const item = await db
       .prepare(`SELECT * FROM checklist_items WHERE id = ?`)
       .get(result.lastInsertRowid);
 
@@ -56,7 +56,7 @@ export async function DELETE(
     const user = requireManager(await getSessionUser());
 
     const { id: checklistId } = await params;
-    if (!canManageChecklist(user, Number(checklistId))) {
+    if (!(await canManageChecklist(user, Number(checklistId)))) {
       return NextResponse.json({ error: "Checklist not found" }, { status: 404 });
     }
     const { searchParams } = new URL(request.url);
@@ -66,10 +66,10 @@ export async function DELETE(
       return NextResponse.json({ error: "itemId required" }, { status: 400 });
     }
 
-    const db = getDb();
-    db.prepare(
-      `DELETE FROM checklist_items WHERE id = ? AND checklist_id = ?`
-    ).run(itemId, checklistId);
+    const db = await getDb();
+    await db
+      .prepare(`DELETE FROM checklist_items WHERE id = ? AND checklist_id = ?`)
+      .run(itemId, checklistId);
 
     return NextResponse.json({ ok: true });
   } catch {

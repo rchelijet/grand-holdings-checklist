@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const facilityId = searchParams.get("facilityId");
 
-  const submissions = listPendingGuestRegistrations(user, {
+  const submissions = await listPendingGuestRegistrations(user, {
     facilityId: facilityId ? Number(facilityId) : undefined,
   });
 

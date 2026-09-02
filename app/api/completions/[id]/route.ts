@@ -18,11 +18,11 @@ export async function GET(
   }
 
   const { id } = await params;
-  const detail = getCompletionDetail(Number(id));
+  const detail = await getCompletionDetail(Number(id));
   if (!detail) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  if (!canAccessCompletion(user, Number(id))) {
+  if (!(await canAccessCompletion(user, Number(id)))) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -41,20 +41,20 @@ export async function PUT(
   const body = await request.json();
   const { items, submit } = body;
 
-  const db = getDb();
-  const completion = db
+  const db = await getDb();
+  const completion = (await db
     .prepare(
       `SELECT cc.*, c.frequency
        FROM checklist_completions cc
        JOIN checklists c ON c.id = cc.checklist_id
        WHERE cc.id = ?`
     )
-    .get(id) as { status: string; due_date: string; frequency: string } | undefined;
+    .get(id)) as { status: string; due_date: string; frequency: string } | undefined;
 
   if (!completion) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  if (!canAccessCompletion(user, Number(id))) {
+  if (!(await canAccessCompletion(user, Number(id)))) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -81,16 +81,18 @@ export async function PUT(
       `UPDATE checklist_completion_items SET completed = ?, note = ? WHERE id = ? AND completion_id = ?`
     );
     for (const item of items) {
-      update.run(item.completed ? 1 : 0, item.note || null, item.id, id);
+      await update.run(item.completed ? 1 : 0, item.note || null, item.id, id);
     }
   }
 
   if (submit) {
-    db.prepare(
-      `UPDATE checklist_completions SET status = 'completed', submitted_at = datetime('now'), user_id = ? WHERE id = ?`
-    ).run(user.id, id);
+    await db
+      .prepare(
+        `UPDATE checklist_completions SET status = 'completed', submitted_at = datetime('now'), user_id = ? WHERE id = ?`
+      )
+      .run(user.id, id);
   }
 
-  const detail = getCompletionDetail(Number(id));
+  const detail = await getCompletionDetail(Number(id));
   return NextResponse.json(detail);
 }

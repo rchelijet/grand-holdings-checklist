@@ -10,10 +10,10 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const db = getDb();
-  const ids = accessibleFacilityIds(user);
+  const db = await getDb();
+  const ids = await accessibleFacilityIds(user);
   const placeholders = ids.map(() => "?").join(",") || "NULL";
-  const facilities = db
+  const facilities = await db
     .prepare(
       `SELECT id, name, address, contact_name, contact_phone, contact_email, created_at
        FROM facilities WHERE id IN (${placeholders}) ORDER BY name`
@@ -35,8 +35,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
     }
 
-    const db = getDb();
-    const result = db
+    const db = await getDb();
+    const result = await db
       .prepare(
         `INSERT INTO facilities (name, address, contact_name, contact_phone, contact_email)
          VALUES (?, ?, ?, ?, ?)`
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
         contact_email?.trim() || ""
       );
 
-    const facility = db
+    const facility = await db
       .prepare(`SELECT * FROM facilities WHERE id = ?`)
       .get(result.lastInsertRowid);
 

@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   const dateTo = searchParams.get("dateTo");
   const facilityId = searchParams.get("facilityId");
 
-  const results = searchCompletions(
+  const results = await searchCompletions(
     user,
     dateFrom,
     dateTo,

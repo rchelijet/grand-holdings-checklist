@@ -1,28 +1,31 @@
 import { getDb } from "./db";
 import type { SessionUser, TaskStatus } from "./types";
 
-export function accessibleFacilityIds(user: SessionUser): number[] {
-  const db = getDb();
+export async function accessibleFacilityIds(user: SessionUser): Promise<number[]> {
+  const db = await getDb();
   if (user.role === "admin" || user.accessAll) {
-    return (db.prepare("SELECT id FROM facilities").all() as { id: number }[]).map(
-      (row) => row.id
-    );
+    return (
+      (await db.prepare("SELECT id FROM facilities").all()) as { id: number }[]
+    ).map((row) => row.id);
   }
   const ids = new Set(user.facilityIds);
   if (user.facilityId) ids.add(user.facilityId);
   return [...ids];
 }
 
-export function canAccessFacility(user: SessionUser, facilityId: number): boolean {
-  return accessibleFacilityIds(user).includes(facilityId);
+export async function canAccessFacility(
+  user: SessionUser,
+  facilityId: number
+): Promise<boolean> {
+  return (await accessibleFacilityIds(user)).includes(facilityId);
 }
 
 export function canManageTask(user: SessionUser): boolean {
   return user.role === "admin" || user.role === "manager";
 }
 
-function taskScope(user: SessionUser) {
-  const facilityIds = accessibleFacilityIds(user);
+async function taskScope(user: SessionUser) {
+  const facilityIds = await accessibleFacilityIds(user);
   return {
     clause:
       facilityIds.length > 0
@@ -32,7 +35,7 @@ function taskScope(user: SessionUser) {
   };
 }
 
-export function listTasks(
+export async function listTasks(
   user: SessionUser,
   filters: {
     facilityId?: number | null;
@@ -42,8 +45,8 @@ export function listTasks(
     year?: number | null;
   } = {}
 ) {
-  const db = getDb();
-  const scope = taskScope(user);
+  const db = await getDb();
+  const scope = await taskScope(user);
   let query = `
     SELECT t.*, f.name AS facility_name, creator.name AS created_by_name,
            assignee.name AS assigned_user_name
@@ -77,7 +80,8 @@ export function listTasks(
     params.push(filters.year);
   }
 
-  query += " ORDER BY CASE WHEN t.status = 'pending' THEN 0 ELSE 1 END, t.expected_date ASC, t.created_at DESC";
+  query +=
+    " ORDER BY CASE WHEN t.status = 'pending' THEN 0 ELSE 1 END, t.expected_date ASC, t.created_at DESC";
   return db.prepare(query).all(...params);
 }
 
@@ -105,10 +109,13 @@ export type TaskDetail = {
   updates: TaskUpdate[];
 };
 
-export function getTask(user: SessionUser, taskId: number): TaskDetail | null {
-  const db = getDb();
-  const scope = taskScope(user);
-  const task = db
+export async function getTask(
+  user: SessionUser,
+  taskId: number
+): Promise<TaskDetail | null> {
+  const db = await getDb();
+  const scope = await taskScope(user);
+  const task = await db
     .prepare(
       `SELECT t.*, f.name AS facility_name, f.address AS facility_address,
               creator.name AS created_by_name, creator.email AS created_by_email,
@@ -140,22 +147,22 @@ export function getTask(user: SessionUser, taskId: number): TaskDetail | null {
     uploaded_by_name: string;
   };
 
-  const rawUpdates = db
+  const rawUpdates = (await db
     .prepare(
       `SELECT tu.*, u.name AS user_name
        FROM task_updates tu JOIN users u ON u.id = tu.user_id
        WHERE tu.task_id = ? ORDER BY tu.created_at DESC, tu.id DESC`
     )
-    .all(taskId) as RawUpdate[];
+    .all(taskId)) as RawUpdate[];
 
-  const rawAttachments = db
+  const rawAttachments = (await db
     .prepare(
       `SELECT ta.id, ta.update_id, ta.file_name, ta.mime_type, ta.data,
               ta.created_at, u.name AS uploaded_by_name
        FROM task_attachments ta JOIN users u ON u.id = ta.uploaded_by
        WHERE ta.task_id = ? ORDER BY ta.created_at ASC, ta.id ASC`
     )
-    .all(taskId) as RawAttachment[];
+    .all(taskId)) as RawAttachment[];
 
   const attachmentsByUpdate = new Map<number, RawAttachment[]>();
   const creationAttachments: RawAttachment[] = [];
@@ -205,12 +212,13 @@ export function getTask(user: SessionUser, taskId: number): TaskDetail | null {
   return { task: task as TaskDetail["task"], updates };
 }
 
-export function getTaskDashboard(user: SessionUser) {
-  const db = getDb();
-  const scope = taskScope(user);
+export async function getTaskDashboard(user: SessionUser) {
+  const db = await getDb();
+  const scope = await taskScope(user);
   const today = new Date().toISOString().slice(0, 10);
+  const facilityIds = await accessibleFacilityIds(user);
 
-  const summary = db
+  const summary = await db
     .prepare(
       `SELECT COUNT(*) AS total,
               COALESCE(SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END), 0) AS pending,
@@ -221,7 +229,7 @@ export function getTaskDashboard(user: SessionUser) {
     )
     .get(today, ...scope.params);
 
-  const properties = db
+  const properties = await db
     .prepare(
       `SELECT f.id, f.name,
               COUNT(t.id) AS total,
@@ -232,10 +240,10 @@ export function getTaskDashboard(user: SessionUser) {
               COALESCE(SUM(CASE WHEN t.status = 'closed' THEN 1 ELSE 0 END), 0) AS closed_with_date
        FROM facilities f
        LEFT JOIN tasks t ON t.facility_id = f.id
-       WHERE f.id IN (${accessibleFacilityIds(user).map(() => "?").join(",") || "NULL"})
+       WHERE f.id IN (${facilityIds.map(() => "?").join(",") || "NULL"})
        GROUP BY f.id, f.name ORDER BY f.name`
     )
-    .all(...accessibleFacilityIds(user));
+    .all(...facilityIds);
 
   return { summary, properties };
 }

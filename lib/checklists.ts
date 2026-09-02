@@ -2,33 +2,33 @@ import { getDb } from "./db";
 import { accessibleFacilityIds } from "./tasks";
 import type { SessionUser } from "./types";
 
-export function canManageChecklist(
+export async function canManageChecklist(
   user: SessionUser,
   checklistId?: number
-): boolean {
+): Promise<boolean> {
   if (user.role === "admin") return true;
   if (user.role !== "manager" || !checklistId) return false;
 
-  const ids = accessibleFacilityIds(user);
+  const ids = await accessibleFacilityIds(user);
   if (ids.length === 0) return false;
   const placeholders = ids.map(() => "?").join(",");
-  const row = getDb()
+  const row = (await (await getDb())
     .prepare(
       `SELECT COUNT(*) AS total,
               SUM(CASE WHEN facility_id IN (${placeholders}) THEN 1 ELSE 0 END) AS allowed
        FROM checklist_facilities
        WHERE checklist_id = ?`
     )
-    .get(...ids, checklistId) as { total: number; allowed: number };
+    .get(...ids, checklistId)) as { total: number; allowed: number };
   return row.total > 0 && row.total === row.allowed;
 }
 
-export function canAssignChecklistFacilities(
+export async function canAssignChecklistFacilities(
   user: SessionUser,
   facilityIds: number[]
-): boolean {
+): Promise<boolean> {
   if (user.role === "admin") return true;
   if (user.role !== "manager" || facilityIds.length === 0) return false;
-  const allowed = new Set(accessibleFacilityIds(user));
+  const allowed = new Set(await accessibleFacilityIds(user));
   return facilityIds.every((id) => allowed.has(id));
 }

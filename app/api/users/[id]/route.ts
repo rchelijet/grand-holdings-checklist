@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { getSessionUser } from "@/lib/session";
 import { assertCanAssignRole, assertCanManageUser, requireAdmin, requireManager } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { getDb, type DbClient } from "@/lib/db";
 
 function parseFacilityIds(raw: unknown): number[] {
   const rawFacilityIds: unknown[] = Array.isArray(raw) ? raw : [];
@@ -15,12 +15,12 @@ function parseFacilityIds(raw: unknown): number[] {
   ];
 }
 
-function countActiveAdmins(db: ReturnType<typeof getDb>): number {
-  const row = db
+async function countActiveAdmins(db: DbClient): Promise<number> {
+  const row = (await db
     .prepare(
       "SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND active = 1"
     )
-    .get() as { count: number };
+    .get()) as { count: number };
   return row.count;
 }
 
@@ -79,10 +79,10 @@ async function updateUser(request: Request, params: Promise<{ id: string }>) {
     );
   }
 
-  const db = getDb();
-  const target = db
+  const db = await getDb();
+  const target = (await db
     .prepare("SELECT id, email, role, active FROM users WHERE id = ?")
-    .get(userId) as
+    .get(userId)) as
     | { id: number; email: string; role: string; active: number }
     | undefined;
 
@@ -99,7 +99,7 @@ async function updateUser(request: Request, params: Promise<{ id: string }>) {
     );
   }
 
-  if (target.role === "admin" && role !== "admin" && countActiveAdmins(db) <= 1) {
+  if (target.role === "admin" && role !== "admin" && (await countActiveAdmins(db)) <= 1) {
     return NextResponse.json(
       { error: "Cannot remove administrator access from the last active administrator" },
       { status: 400 }
@@ -113,9 +113,9 @@ async function updateUser(request: Request, params: Promise<{ id: string }>) {
     );
   }
 
-  const emailTaken = db
+  const emailTaken = (await db
     .prepare("SELECT id FROM users WHERE email = ? AND id != ?")
-    .get(email, userId) as { id: number } | undefined;
+    .get(email, userId)) as { id: number } | undefined;
   if (emailTaken) {
     return NextResponse.json({ error: "Email already exists" }, { status: 409 });
   }
@@ -123,11 +123,11 @@ async function updateUser(request: Request, params: Promise<{ id: string }>) {
   if (facilityIds.length > 0) {
     const existingFacilityIds = new Set(
       (
-        db
+        (await db
           .prepare(
             `SELECT id FROM facilities WHERE id IN (${facilityIds.map(() => "?").join(",")})`
           )
-          .all(...facilityIds) as { id: number }[]
+          .all(...facilityIds)) as { id: number }[]
       ).map((facility) => facility.id)
     );
     if (facilityIds.some((facilityId) => !existingFacilityIds.has(facilityId))) {
@@ -143,30 +143,34 @@ async function updateUser(request: Request, params: Promise<{ id: string }>) {
 
   if (password) {
     const passwordHash = bcrypt.hashSync(password, 10);
-    db.prepare(
-      `UPDATE users
+    await db
+      .prepare(
+        `UPDATE users
        SET email = ?, name = ?, role = ?, facility_id = ?, access_all = ?, password_hash = ?
        WHERE id = ?`
-    ).run(email, name, role, legacyFacilityId, accessAllValue, passwordHash, userId);
+      )
+      .run(email, name, role, legacyFacilityId, accessAllValue, passwordHash, userId);
   } else {
-    db.prepare(
-      `UPDATE users
+    await db
+      .prepare(
+        `UPDATE users
        SET email = ?, name = ?, role = ?, facility_id = ?, access_all = ?
        WHERE id = ?`
-    ).run(email, name, role, legacyFacilityId, accessAllValue, userId);
+      )
+      .run(email, name, role, legacyFacilityId, accessAllValue, userId);
   }
 
-  db.prepare("DELETE FROM user_facilities WHERE user_id = ?").run(userId);
+  await db.prepare("DELETE FROM user_facilities WHERE user_id = ?").run(userId);
   if (facilityIds.length > 0) {
     const assign = db.prepare(
       "INSERT INTO user_facilities (user_id, facility_id) VALUES (?, ?)"
     );
     for (const facilityId of facilityIds) {
-      assign.run(userId, facilityId);
+      await assign.run(userId, facilityId);
     }
   }
 
-  const user = db
+  const user = await db
     .prepare(
       `SELECT id, email, name, role, facility_id, access_all, created_at FROM users WHERE id = ?`
     )
@@ -217,10 +221,10 @@ export async function DELETE(
       );
     }
 
-    const db = getDb();
-    const target = db
+    const db = await getDb();
+    const target = (await db
       .prepare("SELECT id, role, active FROM users WHERE id = ?")
-      .get(userId) as { id: number; role: string; active: number } | undefined;
+      .get(userId)) as { id: number; role: string; active: number } | undefined;
 
     if (!target) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -231,7 +235,7 @@ export async function DELETE(
     }
 
     if (target.role === "admin") {
-      if (countActiveAdmins(db) <= 1) {
+      if ((await countActiveAdmins(db)) <= 1) {
         return NextResponse.json(
           { error: "Cannot deactivate the last active administrator" },
           { status: 400 }
@@ -239,7 +243,7 @@ export async function DELETE(
       }
     }
 
-    db.prepare("UPDATE users SET active = 0 WHERE id = ?").run(userId);
+    await db.prepare("UPDATE users SET active = 0 WHERE id = ?").run(userId);
 
     return NextResponse.json({ success: true });
   } catch {

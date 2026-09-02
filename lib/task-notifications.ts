@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import type Database from "better-sqlite3";
+import type { DbClient } from "./db";
 
 const DEFAULT_SMTP_HOST = "smtp.melohospitality.co.za";
 const DEFAULT_SMTP_PORT = 587;
@@ -41,11 +41,11 @@ function safeSubjectPart(value: string): string {
   return value.replace(/[\r\n]+/g, " ").trim() || "Task";
 }
 
-export function getTaskNotificationRecipients(
-  database: Database.Database,
+export async function getTaskNotificationRecipients(
+  database: DbClient,
   facilityId: number
-): TaskNotificationRecipient[] {
-  return database
+): Promise<TaskNotificationRecipient[]> {
+  return (await database
     .prepare(
       `SELECT DISTINCT u.id, u.name, u.email
        FROM users u
@@ -57,7 +57,7 @@ export function getTaskNotificationRecipients(
          AND TRIM(u.email) <> ''
        ORDER BY u.id`
     )
-    .all(facilityId, facilityId) as TaskNotificationRecipient[];
+    .all(facilityId, facilityId)) as unknown as TaskNotificationRecipient[];
 }
 
 export function composeTaskNotification(
@@ -132,11 +132,11 @@ function smtpConfig() {
 }
 
 export async function sendTaskCreatedNotifications(
-  database: Database.Database,
+  database: DbClient,
   facilityId: number,
   task: TaskNotificationTask
 ): Promise<number> {
-  const recipients = getTaskNotificationRecipients(database, facilityId);
+  const recipients = await getTaskNotificationRecipients(database, facilityId);
   if (recipients.length === 0) return 0;
 
   const message = composeTaskNotification(task);

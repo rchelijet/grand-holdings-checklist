@@ -38,7 +38,7 @@ export async function GET(
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const detail = getTask(user, Number(id));
+  const detail = await getTask(user, Number(id));
   if (!detail) return NextResponse.json({ error: "Task not found" }, { status: 404 });
   return NextResponse.json(detail);
 }
@@ -53,7 +53,7 @@ export async function PATCH(
   try {
     const { id } = await params;
     const taskId = Number(id);
-    const detail = getTask(user, taskId);
+    const detail = await getTask(user, taskId);
     if (!detail) return NextResponse.json({ error: "Task not found" }, { status: 404 });
 
     const form = await request.formData();
@@ -72,10 +72,10 @@ export async function PATCH(
     const assignedUserId = assignedUserValue ? Number(assignedUserValue) : null;
     const status = progress >= 100 ? "closed" : "pending";
     const closedAt = progress >= 100 ? "datetime('now')" : "NULL";
-    const db = getDb();
+    const db = await getDb();
 
     if (hasAssignment && assignedUserId && canManageTask(user)) {
-      const assignee = db
+      const assignee = (await db
         .prepare(
           `SELECT u.id, u.role, u.facility_id, u.access_all,
                   EXISTS(SELECT 1 FROM user_facilities uf
@@ -85,7 +85,7 @@ export async function PATCH(
         .get(
           Number((detail.task as { facility_id?: number }).facility_id),
           assignedUserId
-        ) as
+        )) as
         | {
             id: number;
             role: string;
@@ -110,18 +110,22 @@ export async function PATCH(
     }
 
     if (canManageTask(user) && hasAssignment) {
-      db.prepare(
-        `UPDATE tasks SET progress = ?, status = ?, closed_at = ${closedAt}, assigned_user_id = ? WHERE id = ?`
-      ).run(progress, status, assignedUserId, taskId);
+      await db
+        .prepare(
+          `UPDATE tasks SET progress = ?, status = ?, closed_at = ${closedAt}, assigned_user_id = ? WHERE id = ?`
+        )
+        .run(progress, status, assignedUserId, taskId);
     } else if (canManageTask(user)) {
-      db.prepare(
-        `UPDATE tasks SET progress = ?, status = ?, closed_at = ${closedAt} WHERE id = ?`
-      ).run(progress, status, taskId);
+      await db
+        .prepare(
+          `UPDATE tasks SET progress = ?, status = ?, closed_at = ${closedAt} WHERE id = ?`
+        )
+        .run(progress, status, taskId);
     }
 
     let updateId: number | null = null;
     if (note || progress !== currentProgress || files.length > 0) {
-      const update = db
+      const update = await db
         .prepare(
           `INSERT INTO task_updates (task_id, user_id, note, progress)
            VALUES (?, ?, ?, ?)`
@@ -131,13 +135,15 @@ export async function PATCH(
     }
 
     for (const file of files) {
-      db.prepare(
-        `INSERT INTO task_attachments (task_id, update_id, uploaded_by, file_name, mime_type, data)
+      await db
+        .prepare(
+          `INSERT INTO task_attachments (task_id, update_id, uploaded_by, file_name, mime_type, data)
          VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(taskId, updateId, user.id, file.name, file.type, file.data);
+        )
+        .run(taskId, updateId, user.id, file.name, file.type, file.data);
     }
 
-    return NextResponse.json(getTask(user, taskId));
+    return NextResponse.json(await getTask(user, taskId));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not update task";
     return NextResponse.json({ error: message }, { status: 400 });
@@ -151,10 +157,10 @@ export async function DELETE(
   try {
     const user = requireAdmin(await getSessionUser());
     const { id } = await params;
-    if (!getTask(user, Number(id))) {
+    if (!(await getTask(user, Number(id)))) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
-    getDb().prepare("DELETE FROM tasks WHERE id = ?").run(Number(id));
+    await (await getDb()).prepare("DELETE FROM tasks WHERE id = ?").run(Number(id));
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });

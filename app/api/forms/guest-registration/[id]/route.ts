@@ -103,7 +103,7 @@ export async function GET(
   const { searchParams } = new URL(request.url);
 
   if (searchParams.get("download") === "pdf") {
-    const pdfPath = getSubmissionPdfPath(user, submissionId);
+    const pdfPath = await getSubmissionPdfPath(user, submissionId);
     if (!pdfPath) {
       return NextResponse.json({ error: "PDF not found" }, { status: 404 });
     }
@@ -116,7 +116,7 @@ export async function GET(
     });
   }
 
-  const submission = getSubmission(user, submissionId);
+  const submission = await getSubmission(user, submissionId);
   if (!submission) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
@@ -138,7 +138,7 @@ export async function GET(
       idNumber: submission.id_number,
       contentHash: submission.content_hash,
       data: submission.data,
-      identityDocuments: getIdentityDocuments(submissionId),
+      identityDocuments: await getIdentityDocuments(submissionId),
     },
   });
 }

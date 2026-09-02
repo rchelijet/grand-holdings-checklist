@@ -14,11 +14,11 @@ export async function GET(
   }
 
   const { id } = await params;
-  if (!canManageChecklist(user, Number(id))) {
+  if (!(await canManageChecklist(user, Number(id)))) {
     return NextResponse.json({ error: "Checklist not found" }, { status: 404 });
   }
-  const db = getDb();
-  const checklist = db
+  const db = await getDb();
+  const checklist = await db
     .prepare(`SELECT * FROM checklists WHERE id = ?`)
     .get(id);
 
@@ -26,7 +26,7 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const facilities = db
+  const facilities = await db
     .prepare(
       `
     SELECT f.id, f.name FROM facilities f
@@ -36,7 +36,7 @@ export async function GET(
     )
     .all(id);
 
-  const items = db
+  const items = await db
     .prepare(
       `SELECT * FROM checklist_items WHERE checklist_id = ? ORDER BY sort_order`
     )
@@ -53,7 +53,7 @@ export async function PUT(
     const user = requireManager(await getSessionUser());
 
     const { id } = await params;
-    if (!canManageChecklist(user, Number(id))) {
+    if (!(await canManageChecklist(user, Number(id)))) {
       return NextResponse.json({ error: "Checklist not found" }, { status: 404 });
     }
     const body = await request.json();
@@ -66,23 +66,21 @@ export async function PUT(
         normalizedFacilityIds.length === 0) {
       return NextResponse.json({ error: "Name, frequency, and at least one property are required" }, { status: 400 });
     }
-    if (!canAssignChecklistFacilities(user, normalizedFacilityIds)) {
+    if (!(await canAssignChecklistFacilities(user, normalizedFacilityIds))) {
       return NextResponse.json({ error: "You cannot assign a checklist to one or more properties" }, { status: 403 });
     }
-    const db = getDb();
-    db.prepare(`UPDATE checklists SET name = ?, frequency = ? WHERE id = ?`).run(
-      name?.trim(),
-      frequency,
-      id
-    );
+    const db = await getDb();
+    await db
+      .prepare(`UPDATE checklists SET name = ?, frequency = ? WHERE id = ?`)
+      .run(name?.trim(), frequency, id);
 
     if (Array.isArray(facilityIds)) {
-      db.prepare(`DELETE FROM checklist_facilities WHERE checklist_id = ?`).run(id);
+      await db.prepare(`DELETE FROM checklist_facilities WHERE checklist_id = ?`).run(id);
       const assign = db.prepare(
         `INSERT INTO checklist_facilities (checklist_id, facility_id) VALUES (?, ?)`
       );
       for (const fid of normalizedFacilityIds) {
-        assign.run(id, fid);
+        await assign.run(id, fid);
       }
     }
 
@@ -100,11 +98,11 @@ export async function DELETE(
     const user = requireManager(await getSessionUser());
 
     const { id } = await params;
-    if (!canManageChecklist(user, Number(id))) {
+    if (!(await canManageChecklist(user, Number(id)))) {
       return NextResponse.json({ error: "Checklist not found" }, { status: 404 });
     }
-    const db = getDb();
-    db.prepare(`DELETE FROM checklists WHERE id = ?`).run(id);
+    const db = await getDb();
+    await db.prepare(`DELETE FROM checklists WHERE id = ?`).run(id);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });

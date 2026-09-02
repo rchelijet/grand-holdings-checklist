@@ -1,30 +1,35 @@
-import Database from "better-sqlite3";
 import bcrypt from "bcryptjs";
-import fs from "fs";
-import path from "path";
+import {
+  createDbClient,
+  createLibsqlClient,
+  type DbClient,
+} from "./db-client";
 
-const dbPath = path.join(process.cwd(), "data", "grand-holdings.db");
+export type { DbClient } from "./db-client";
 
-let db: Database.Database | null = null;
+let dbPromise: Promise<DbClient> | null = null;
 
-export function getDb(): Database.Database {
-  if (!db) {
-    const dir = path.dirname(dbPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    db = new Database(dbPath);
-    db.pragma("journal_mode = WAL");
-    db.pragma("foreign_keys = ON");
-    initSchema(db);
-    seedIfEmpty(db);
-    refreshDemoProperties(db);
+export async function getDb(): Promise<DbClient> {
+  if (!dbPromise) {
+    dbPromise = initDb();
   }
+  return dbPromise;
+}
+
+async function initDb(): Promise<DbClient> {
+  const client = createLibsqlClient();
+  const db = createDbClient(client);
+
+  await db.execute("PRAGMA foreign_keys = ON");
+  await initSchema(db);
+  await seedIfEmpty(db);
+  await refreshDemoProperties(db);
+
   return db;
 }
 
-function initSchema(database: Database.Database) {
-  database.exec(`
+async function initSchema(database: DbClient) {
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS facilities (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -166,40 +171,38 @@ function initSchema(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_form_submission_attachments_submission
       ON form_submission_attachments(submission_id);
   `);
-  migrateUserSchema(database);
-  migrateFormSubmissionSchema(database);
+  await migrateUserSchema(database);
+  await migrateFormSubmissionSchema(database);
 }
 
-function migrateUserSchema(database: Database.Database) {
-  const columns = database
+async function migrateUserSchema(database: DbClient) {
+  const columns = (await database
     .prepare("PRAGMA table_info(users)")
-    .all() as { name: string }[];
+    .all()) as { name: string }[];
   if (!columns.some((column) => column.name === "access_all")) {
-    database.exec(
+    await database.exec(
       "ALTER TABLE users ADD COLUMN access_all INTEGER NOT NULL DEFAULT 0"
     );
   }
   if (!columns.some((column) => column.name === "active")) {
-    database.exec(
+    await database.exec(
       "ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1"
     );
   }
 
-  const table = database
+  const table = (await database
     .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'")
-    .get() as { sql: string } | undefined;
+    .get()) as { sql: string } | undefined;
   if (table?.sql && !table.sql.includes("'manager'")) {
-    const legacyColumns = database
+    const legacyColumns = (await database
       .prepare("PRAGMA table_info(users)")
-      .all() as { name: string }[];
+      .all()) as { name: string }[];
     const legacyHasActive = legacyColumns.some((column) => column.name === "active");
-    const activeSelect = legacyHasActive
-      ? "COALESCE(active, 1)"
-      : "1";
+    const activeSelect = legacyHasActive ? "COALESCE(active, 1)" : "1";
 
-    database.pragma("foreign_keys = OFF");
-    database.pragma("legacy_alter_table = ON");
-    database.exec(`
+    await database.execute("PRAGMA foreign_keys = OFF");
+    await database.execute("PRAGMA legacy_alter_table = ON");
+    await database.exec(`
       ALTER TABLE users RENAME TO users_legacy;
       CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -217,20 +220,20 @@ function migrateUserSchema(database: Database.Database) {
         FROM users_legacy;
       DROP TABLE users_legacy;
     `);
-    database.pragma("legacy_alter_table = OFF");
-    database.pragma("foreign_keys = ON");
+    await database.execute("PRAGMA legacy_alter_table = OFF");
+    await database.execute("PRAGMA foreign_keys = ON");
   }
 
-  const columnsAfter = database
+  const columnsAfter = (await database
     .prepare("PRAGMA table_info(users)")
-    .all() as { name: string }[];
+    .all()) as { name: string }[];
   if (!columnsAfter.some((column) => column.name === "active")) {
-    database.exec(
+    await database.exec(
       "ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1"
     );
   }
 
-  database.exec(`
+  await database.exec(`
     INSERT OR IGNORE INTO user_facilities (user_id, facility_id)
       SELECT id, facility_id FROM users
       WHERE facility_id IS NOT NULL;
@@ -238,52 +241,53 @@ function migrateUserSchema(database: Database.Database) {
     UPDATE users SET active = 1 WHERE active IS NULL OR active NOT IN (0, 1);
   `);
 
-  // One-time repair: users table rebuilds omitted active, leaving accounts invisible.
-  const repaired = database
+  const repaired = await database
     .prepare(
       "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_active_repair_v1'"
     )
     .get();
   if (!repaired) {
-    database.exec(`
+    await database.exec(`
       CREATE TABLE user_active_repair_v1 (id INTEGER PRIMARY KEY);
       UPDATE users SET active = 1 WHERE active = 0;
     `);
   }
 }
 
-function formSubmissionColumnNames(database: Database.Database): Set<string> {
-  const columns = database
+async function formSubmissionColumnNames(
+  database: DbClient
+): Promise<Set<string>> {
+  const columns = (await database
     .prepare("PRAGMA table_info(form_submissions)")
-    .all() as { name: string }[];
+    .all()) as { name: string }[];
   return new Set(columns.map((column) => column.name));
 }
 
-function migrateFormSubmissionSchema(database: Database.Database) {
-  const columns = formSubmissionColumnNames(database);
+async function migrateFormSubmissionSchema(database: DbClient) {
+  const columns = await formSubmissionColumnNames(database);
 
   if (!columns.has("status")) {
-    database.exec(
+    await database.exec(
       "ALTER TABLE form_submissions ADD COLUMN status TEXT NOT NULL DEFAULT 'prepared'"
     );
     columns.add("status");
   }
   if (!columns.has("prepared_by")) {
-    database.exec(
+    await database.exec(
       "ALTER TABLE form_submissions ADD COLUMN prepared_by INTEGER REFERENCES users(id) ON DELETE SET NULL"
     );
     columns.add("prepared_by");
   }
   if (!columns.has("prepared_at")) {
-    database.exec("ALTER TABLE form_submissions ADD COLUMN prepared_at TEXT");
+    await database.exec("ALTER TABLE form_submissions ADD COLUMN prepared_at TEXT");
     columns.add("prepared_at");
   }
   if (!columns.has("completed_at")) {
-    database.exec("ALTER TABLE form_submissions ADD COLUMN completed_at TEXT");
+    await database.exec("ALTER TABLE form_submissions ADD COLUMN completed_at TEXT");
     columns.add("completed_at");
   }
 
-  database.exec(`
+  await database.exec(`
     UPDATE form_submissions
     SET status = 'completed',
         completed_at = COALESCE(completed_at, submitted_at),
@@ -297,21 +301,21 @@ function migrateFormSubmissionSchema(database: Database.Database) {
     WHERE status IN ('draft', 'prepared');
   `);
 
-  database.exec(
+  await database.exec(
     "CREATE INDEX IF NOT EXISTS idx_form_submissions_status ON form_submissions(status)"
   );
 }
 
-function seedIfEmpty(database: Database.Database) {
-  const userCount = database
+async function seedIfEmpty(database: DbClient) {
+  const userCount = (await database
     .prepare("SELECT COUNT(*) as count FROM users")
-    .get() as { count: number };
+    .get()) as { count: number };
 
   if (userCount.count > 0) return;
 
   const insertFacility = database.prepare(`
     INSERT INTO facilities (name, address, contact_name, contact_phone, contact_email)
-    VALUES (@name, @address, @contact_name, @contact_phone, @contact_email)
+    VALUES (?, ?, ?, ?, ?)
   `);
 
   const facilities = [
@@ -340,18 +344,24 @@ function seedIfEmpty(database: Database.Database) {
 
   const facilityIds: number[] = [];
   for (const f of facilities) {
-    const result = insertFacility.run(f);
+    const result = await insertFacility.run(
+      f.name,
+      f.address,
+      f.contact_name,
+      f.contact_phone,
+      f.contact_email
+    );
     facilityIds.push(Number(result.lastInsertRowid));
   }
 
   const passwordHash = bcrypt.hashSync("admin123", 10);
-  database
+  await database
     .prepare(
       `INSERT INTO users (email, password_hash, name, role, facility_id, access_all) VALUES (?, ?, ?, 'admin', NULL, 1)`
     )
     .run("admin@grandholdings.co.za", passwordHash, "System Administrator");
 
-  database
+  await database
     .prepare(
       `INSERT INTO users (email, password_hash, name, role, facility_id, access_all) VALUES (?, ?, ?, 'manager', ?, 0)`
     )
@@ -362,17 +372,15 @@ function seedIfEmpty(database: Database.Database) {
       facilityIds[0]
     );
 
-  database
+  await database
     .prepare(
       `INSERT INTO user_facilities (user_id, facility_id)
        SELECT id, ? FROM users WHERE email = 'manager.cpt@grandholdings.co.za'`
     )
     .run(facilityIds[0]);
 
-  const checklistResult = database
-    .prepare(
-      `INSERT INTO checklists (name, frequency) VALUES ('Daily Checks', 'daily')`
-    )
+  const checklistResult = await database
+    .prepare(`INSERT INTO checklists (name, frequency) VALUES ('Daily Checks', 'daily')`)
     .run();
   const checklistId = Number(checklistResult.lastInsertRowid);
 
@@ -386,17 +394,19 @@ function seedIfEmpty(database: Database.Database) {
   const insertItem = database.prepare(
     `INSERT INTO checklist_items (checklist_id, description, sort_order) VALUES (?, ?, ?)`
   );
-  items.forEach((desc, i) => insertItem.run(checklistId, desc, i));
+  for (let i = 0; i < items.length; i++) {
+    await insertItem.run(checklistId, items[i], i);
+  }
 
   const assignFacility = database.prepare(
     `INSERT INTO checklist_facilities (checklist_id, facility_id) VALUES (?, ?)`
   );
   for (const fid of facilityIds) {
-    assignFacility.run(checklistId, fid);
+    await assignFacility.run(checklistId, fid);
   }
 }
 
-function refreshDemoProperties(database: Database.Database) {
+async function refreshDemoProperties(database: DbClient) {
   const updates = [
     {
       from: "Grand Hotel Cape Town",
@@ -425,19 +435,25 @@ function refreshDemoProperties(database: Database.Database) {
     `UPDATE facilities SET name = ?, address = ?, contact_email = ?, contact_phone = ? WHERE name = ?`
   );
   for (const row of updates) {
-    stmt.run(row.name, row.address, row.contact_email, row.contact_phone, row.from);
+    await stmt.run(
+      row.name,
+      row.address,
+      row.contact_email,
+      row.contact_phone,
+      row.from
+    );
   }
 
-  database
+  await database
     .prepare(`UPDATE users SET name = ? WHERE email = ?`)
     .run("Lodge Manager", "manager.cpt@grandholdings.co.za");
-  database
+  await database
     .prepare(
       `UPDATE users SET role = 'manager', access_all = 0
        WHERE email = 'manager.cpt@grandholdings.co.za'`
     )
     .run();
-  database
+  await database
     .prepare(
       `INSERT OR IGNORE INTO user_facilities (user_id, facility_id)
        SELECT id, facility_id FROM users
