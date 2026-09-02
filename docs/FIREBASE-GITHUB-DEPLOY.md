@@ -126,8 +126,12 @@ Secrets are **not** read from `.env.local` during GitHub builds. Create them in 
 
 ```bash
 npx -y firebase-tools@latest login
-npx -y firebase-tools@latest apphosting:secrets:set AUTH_SECRET
-npx -y firebase-tools@latest apphosting:secrets:set SMTP_PASSWORD
+
+openssl rand -base64 48 | npx -y firebase-tools@latest apphosting:secrets:set AUTH_SECRET --project grandh-3c1b2 --data-file -
+printf '%s' 'YOUR_SMTP_PASSWORD' | npx -y firebase-tools@latest apphosting:secrets:set SMTP_PASSWORD --project grandh-3c1b2 --data-file -
+
+# Comma-separated secret names (not space-separated)
+npx -y firebase-tools@latest apphosting:secrets:grantaccess AUTH_SECRET,SMTP_PASSWORD --backend grand-holdings-checklist --project grandh-3c1b2
 ```
 
 Secret names must match `apphosting.yaml`:
@@ -192,6 +196,8 @@ Firebase Console → App Hosting → **grand-holdings-checklist** → **Add cust
 | GitHub connection fails | Re-authorize Firebase GitHub App; confirm repo visibility |
 | Build fails on `better-sqlite3` | `serverExternalPackages` is in `next.config.ts`; check Cloud Build logs |
 | `AUTH_SECRET` / `SMTP_PASSWORD` errors | Create secrets in Console; names must match `apphosting.yaml` |
+| `grantaccess` fails with invalid Secret ID | Use comma-separated names: `AUTH_SECRET,SMTP_PASSWORD` (not a space) |
+| Generic `apphosting-adapter-nextjs-build` failure | Check rollout debug logs; confirm secrets exist and `grantaccess` succeeded; run `npm run build` locally |
 | App works but data resets | Expected with SQLite — migrate to Turso/Cloud SQL/Firestore |
 | `403` on first deploy | Project Owner may need to complete first rollout (bucket creation) |
 | Wrong branch deploys | App Hosting → backend settings → set live branch to `main` |

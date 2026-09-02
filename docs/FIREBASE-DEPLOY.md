@@ -76,13 +76,16 @@ Secrets are stored in Google Cloud Secret Manager — never commit them.
 
 ```bash
 # Session signing key (generate a long random value, e.g. openssl rand -base64 48)
-npx -y firebase-tools@latest apphosting:secrets:set AUTH_SECRET
+openssl rand -base64 48 | npx -y firebase-tools@latest apphosting:secrets:set AUTH_SECRET --project YOUR_PROJECT_ID --data-file -
 
 # SMTP password (use your rotated credential, not the old leaked one)
-npx -y firebase-tools@latest apphosting:secrets:set SMTP_PASSWORD
+printf '%s' 'YOUR_SMTP_PASSWORD' | npx -y firebase-tools@latest apphosting:secrets:set SMTP_PASSWORD --project YOUR_PROJECT_ID --data-file -
+
+# Grant the backend access to both secrets (comma-separated, not space-separated)
+npx -y firebase-tools@latest apphosting:secrets:grantaccess AUTH_SECRET,SMTP_PASSWORD --backend grand-holdings-checklist --project YOUR_PROJECT_ID
 ```
 
-Grant access if prompted. Secret names must match `apphosting.yaml` (`AUTH_SECRET`, `SMTP_PASSWORD`).
+Grant access when prompted during `secrets:set`, or run `grantaccess` afterward. Secret names must match `apphosting.yaml` (`AUTH_SECRET`, `SMTP_PASSWORD`). **Use a comma between secret names** — `AUTH_SECRET SMTP_PASSWORD` is treated as one invalid secret ID.
 
 Non-secret SMTP settings are already in `apphosting.yaml`. Override there if your mail host differs.
 
@@ -202,6 +205,8 @@ Set a [budget spend cap](https://firebase.google.com/docs/projects/billing/avoid
 |---------|-----|
 | `No authorized accounts` | Run `firebase login` |
 | `403 PERMISSION_DENIED` on first deploy | Project Owner must run first deploy to create storage bucket |
+| `Misconfigured secret` / secret version errors | Create secrets; run `grantaccess` with comma-separated names: `AUTH_SECRET,SMTP_PASSWORD` |
+| Build fails on `apphosting-adapter-nextjs-build` | Open rollout debug logs; confirm `grantaccess` succeeded; run `npm run build` locally |
 | Build fails on `better-sqlite3` | `serverExternalPackages` is set in `next.config.ts`; ensure native module compiles in Cloud Build |
 | App loads but data resets | Expected with SQLite — migrate database |
 | SMTP errors | Verify `SMTP_PASSWORD` secret; check Cloud Logging |

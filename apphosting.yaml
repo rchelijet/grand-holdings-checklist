@@ -21,10 +21,10 @@ env:
       - RUNTIME
 
   # Create with: npx firebase-tools@latest apphosting:secrets:set AUTH_SECRET
+  # Grant with: npx firebase-tools@latest apphosting:secrets:grantaccess AUTH_SECRET,SMTP_PASSWORD --backend grand-holdings-checklist
   - variable: AUTH_SECRET
     secret: AUTH_SECRET
     availability:
-      - BUILD
       - RUNTIME
 
   # Create with: npx firebase-tools@latest apphosting:secrets:set SMTP_PASSWORD
