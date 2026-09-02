@@ -52,3 +52,6 @@ next-env.d.ts
 # not deployed to App Hosting (see firebase.json ignore list)
 /ripple-sync/
 grand-holdings-php*.zip
+
+# local archives
+grand-holdings-checklist.zip
