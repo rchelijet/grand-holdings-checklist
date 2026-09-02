@@ -33,17 +33,16 @@ env:
     availability:
       - RUNTIME
 
-  # Turso libSQL — create with apphosting:secrets:set (see docs/FIREBASE-DEPLOY.md)
-  # Grant with: ... grantaccess AUTH_SECRET,SMTP_PASSWORD,TURSO_DATABASE_URL,TURSO_AUTH_TOKEN
-  - variable: TURSO_DATABASE_URL
-    secret: TURSO_DATABASE_URL
-    availability:
-      - RUNTIME
-
-  - variable: TURSO_AUTH_TOKEN
-    secret: TURSO_AUTH_TOKEN
-    availability:
-      - RUNTIME
+  # Turso libSQL — uncomment AFTER creating secrets (see docs/FIREBASE-DEPLOY.md).
+  # App Hosting preparer fails if these reference secrets that do not exist yet.
+  # - variable: TURSO_DATABASE_URL
+  #   secret: TURSO_DATABASE_URL
+  #   availability:
+  #     - RUNTIME
+  # - variable: TURSO_AUTH_TOKEN
+  #   secret: TURSO_AUTH_TOKEN
+  #   availability:
+  #     - RUNTIME
 
   - variable: SMTP_HOST
     value: smtp.melohospitality.co.za
