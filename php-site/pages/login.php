@@ -23,18 +23,13 @@ $flash = pull_flash();
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="login">
             <label>Email
-                <input type="email" name="email" required placeholder="admin@grandholdings.co.za">
+                <input type="email" name="email" required placeholder="you@example.com">
             </label>
             <label>Password
                 <input type="password" name="password" required>
             </label>
             <button class="button primary full" type="submit">Sign in</button>
         </form>
-        <div class="demo-box">
-            <strong>Demo access</strong>
-            <span>Administrator: admin@grandholdings.co.za / admin123</span>
-            <span>Manager: manager.cpt@grandholdings.co.za / manager123</span>
-        </div>
     </div>
 </body>
 </html>

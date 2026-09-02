@@ -73,7 +73,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-xl border border-forest/15 bg-white px-3.5 py-2.5 text-ink outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/20"
-                placeholder="admin@grandholdings.co.za"
+                placeholder="you@example.com"
               />
             </label>
 
@@ -104,14 +104,6 @@ export default function LoginPage() {
               {loading ? "Signing in..." : "Sign in"}
             </button>
           </form>
-
-          <div className="mt-7 rounded-2xl border border-gold/20 bg-cream/80 px-4 py-3 text-xs text-forest/70">
-            <p className="font-medium tracking-[0.16em] text-forest uppercase">
-              Guest access
-            </p>
-            <p className="mt-1.5">admin@grandholdings.co.za / admin123</p>
-            <p>manager.cpt@grandholdings.co.za / manager123</p>
-          </div>
         </div>
       </div>
     </div>
