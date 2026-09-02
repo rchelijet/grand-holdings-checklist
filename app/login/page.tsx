@@ -57,9 +57,6 @@ export default function LoginPage() {
               Game lodges · Winelands · Robertson
             </p>
             <div className="gold-rule mt-5 w-32" />
-            <p className="mt-4 font-serif text-xl text-forest/80">
-              Checklist Manager
-            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">

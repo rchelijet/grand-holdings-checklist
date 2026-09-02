@@ -17,7 +17,6 @@ $flash = pull_flash();
         <h1>Grand Holdings</h1>
         <span class="login-kicker">Game lodges · Winelands · Robertson</span>
         <div class="gold-rule"></div>
-        <p class="login-title">Checklist Manager</p>
         <?php if ($flash): ?><div class="flash <?= e($flash['type']) ?>"><?= e($flash['message']) ?></div><?php endif; ?>
         <form method="post" action="index.php" class="stack-form">
             <?= csrf_field() ?>
