@@ -1,0 +1,64 @@
+# Firebase App Hosting configuration for Grand Holdings Checklist.
+# Docs: https://firebase.google.com/docs/app-hosting/configure
+
+runConfig:
+  cpu: 1
+  memoryMiB: 1024
+  minInstances: 0
+  maxInstances: 10
+  concurrency: 80
+
+env:
+  - variable: NODE_ENV
+    value: production
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: APP_TIME_ZONE
+    value: Africa/Johannesburg
+    availability:
+      - RUNTIME
+
+  # Create with: npx firebase-tools@latest apphosting:secrets:set AUTH_SECRET
+  - variable: AUTH_SECRET
+    secret: AUTH_SECRET
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # Create with: npx firebase-tools@latest apphosting:secrets:set SMTP_PASSWORD
+  - variable: SMTP_PASSWORD
+    secret: SMTP_PASSWORD
+    availability:
+      - RUNTIME
+
+  - variable: SMTP_HOST
+    value: smtp.melohospitality.co.za
+    availability:
+      - RUNTIME
+
+  - variable: SMTP_PORT
+    value: "587"
+    availability:
+      - RUNTIME
+
+  - variable: SMTP_SECURE
+    value: "false"
+    availability:
+      - RUNTIME
+
+  - variable: SMTP_REQUIRE_TLS
+    value: "true"
+    availability:
+      - RUNTIME
+
+  - variable: SMTP_USER
+    value: noreply@meloshospitality.co.za
+    availability:
+      - RUNTIME
+
+  - variable: SMTP_FROM
+    value: noreply@meloshospitality.co.za
+    availability:
+      - RUNTIME

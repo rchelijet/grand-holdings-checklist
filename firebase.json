@@ -1,0 +1,18 @@
+{
+  "apphosting": [
+    {
+      "backendId": "grand-holdings-checklist",
+      "rootDir": "/",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "functions",
+        "ripple-sync",
+        "php-site",
+        "data"
+      ]
+    }
+  ]
+}
